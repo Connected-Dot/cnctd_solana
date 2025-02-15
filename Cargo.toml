@@ -1,0 +1,11 @@
+[package]
+name = "cnctd_solana"
+version = "0.1.0"
+edition = "2021"
+authors = ["Connected Dot Inc.", "Kyle Ebner <kyle@cnctd.world>"]
+description = "tools for interacting between the cnctd ecosystem and the solana blockchain."
+repository = "https://github.com/Connected-Dot/cnctd_solana"
+license = "MIT"
+keywords = ["module"]
+
+[dependencies]
