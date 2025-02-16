@@ -1,3 +1,2 @@
 pub mod rpc;
-pub mod smart_contracts;
-
+pub mod api;
