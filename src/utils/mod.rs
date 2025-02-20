@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use solana_sdk::{instruction::{CompiledInstruction, Instruction}, pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction};
+use solana_sdk::{instruction::{CompiledInstruction, Instruction}, pubkey::Pubkey, transaction::Transaction};
 
 pub fn add_memo_instruction(tx: &mut Transaction, message: &str, payer_pubkey: Pubkey) {
     let memo_program_id = Pubkey::from_str("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr").unwrap();

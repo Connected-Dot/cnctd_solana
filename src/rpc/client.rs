@@ -9,8 +9,6 @@ use solana_sdk::{
 use borsh::{BorshSerialize, BorshDeserialize};
 use anyhow::{Result, anyhow};
 
-use crate::utils::add_memo_instruction;
-
 pub struct CnctdSolana {
     rpc_url: String,
 }
@@ -126,7 +124,6 @@ impl CnctdSolana {
         instruction_data: T,
         account_pubkeys: Vec<String>,
         payer_address: String,
-        memo: Option<String>
     ) -> Result<String> {
         let program_id = Pubkey::from_str(program_id)
             .map_err(|_| anyhow!("Invalid program ID"))?;
@@ -150,13 +147,6 @@ impl CnctdSolana {
         
         let message = Message::new(&[instruction], Some(&payer_address));
         let transaction = Transaction::new_unsigned(message);
-        let transaction = if let Some(memo) = memo {
-            let mut tx = transaction;
-            add_memo_instruction(&mut tx, &memo, payer_address);
-            tx
-        } else {
-            transaction
-        };
     
         let serialized_tx = bincode::serialize(&transaction)?;
         let base64_tx = base64::engine::general_purpose::STANDARD.encode(serialized_tx);
