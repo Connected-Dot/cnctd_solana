@@ -123,15 +123,14 @@ impl CnctdSolana {
         instruction_name: &str,
         instruction_data: T,
         account_pubkeys: Vec<String>,
+        payer_address: String,
     ) -> Result<String> {
         let program_id = Pubkey::from_str(program_id)
             .map_err(|_| anyhow!("Invalid program ID"))?;
     
-        // ✅ Prepend the discriminator
         let mut data = get_discriminator(instruction_name).to_vec();
         data.extend(borsh::to_vec(&instruction_data)?);
     
-        // ✅ Convert String pubkeys into AccountMeta
         let accounts = account_pubkeys
             .into_iter()
             .map(|pubkey_str| {
@@ -142,12 +141,13 @@ impl CnctdSolana {
             .collect::<Result<Vec<_>>>()?;
     
         let instruction = Instruction::new_with_bytes(program_id, &data, accounts);
-    
-        // ✅ Construct an unsigned transaction
-        let message = Message::new(&[instruction], None);
+
+        let payer_address = Pubkey::from_str(&payer_address)
+            .map_err(|_| anyhow!("Invalid payer public key"))?;    
+        
+        let message = Message::new(&[instruction], Some(&payer_address));
         let transaction = Transaction::new_unsigned(message);
     
-        // ✅ Serialize the transaction to Base64 (easier to pass around)
         let serialized_tx = bincode::serialize(&transaction)?;
         let base64_tx = base64::engine::general_purpose::STANDARD.encode(serialized_tx);
     
