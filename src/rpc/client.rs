@@ -3,9 +3,9 @@ use std::str::FromStr;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_client::{nonblocking::rpc_client::RpcClient, rpc_config::RpcSimulateTransactionConfig};
 use solana_sdk::{
-    account::Account, hash::hashv, instruction::{AccountMeta, Instruction}, message::Message, pubkey::Pubkey, signature::{Keypair, Signer}, signer::EncodableKey, transaction::Transaction
+    account::Account, commitment_config::CommitmentConfig, hash::hashv, instruction::{AccountMeta, Instruction}, message::Message, pubkey::Pubkey, signature::{Keypair, Signature, Signer}, signer::EncodableKey, transaction::Transaction
 };
 use borsh::{BorshSerialize, BorshDeserialize};
 use anyhow::{Result, anyhow};
@@ -33,13 +33,17 @@ pub enum PdaState {
 }
 
 pub struct CnctdSolana {
-    rpc_url: String,
+    pub rpc_url: String,
+    pub signer_keypair: Option<Keypair>,
+    pub client: RpcClient,
 }
 
 impl CnctdSolana {
     pub fn new(rpc_url: &str) -> Result<Self> {
         Ok(Self {
             rpc_url: rpc_url.to_string(),
+            signer_keypair: None,
+            client: RpcClient::new(rpc_url.to_string()),
         })
     }
 
@@ -49,14 +53,14 @@ impl CnctdSolana {
     }
 
     pub async fn get_latest_blockhash(&self) -> Result<String> {
-        let client = RpcClient::new(self.rpc_url.clone());
+        let client = &self.client;
         let blockhash = client.get_latest_blockhash().await?;
 
         Ok(blockhash.to_string())
     }
 
     pub async fn get_minimum_balance_for_rent_exemption(&self, data_len: usize) -> Result<u64> {
-        let client = RpcClient::new(self.rpc_url.clone());
+        let client = &self.client;
         let min_balance = client.get_minimum_balance_for_rent_exemption(data_len).await?;
 
         Ok(min_balance)
@@ -78,7 +82,7 @@ impl CnctdSolana {
     
     //     println!("data (with discriminator): {:?}", data);
     
-    //     let client = RpcClient::new(self.rpc_url.clone());
+    //     let client = &self.client;
     
     //     let keypair_path = "/Users/kyleebner/.config/solana/id.json";
     //     let payer = Keypair::read_from_file(keypair_path)
@@ -126,7 +130,7 @@ impl CnctdSolana {
     
     //     println!("data (with discriminator): {:?}", data);
     
-    //     let client = RpcClient::new(self.rpc_url.clone());
+    //     let client = &self.client;
     
     //     let keypair_path = "/Users/kyleebner/.config/solana/id.json";
     //     let payer = Keypair::read_from_file(keypair_path)
@@ -167,7 +171,7 @@ impl CnctdSolana {
         instruction_data: T,
         accounts: Vec<AccountMeta>, // Now contains payer info
     ) -> Result<Transaction> {
-        let mut data = get_discriminator(instruction_name).to_vec();
+        let mut data = Self::get_discriminator(instruction_name).to_vec();
         data.extend(borsh::to_vec(&instruction_data)?);
     
         // Find the first writable signer (payer)
@@ -185,7 +189,20 @@ impl CnctdSolana {
         Ok(transaction)
     }
 
+    pub async fn create_instruction(
+        &self,
+        program_id: Pubkey,
+        instruction_name: &str,
+        instruction_data: impl BorshSerialize,
+        accounts: Vec<AccountMeta>,
+    ) -> Result<Instruction> {
+        let mut data = Self::get_discriminator(instruction_name).to_vec();
+        data.extend(borsh::to_vec(&instruction_data)?);
     
+        let instruction = Instruction::new_with_bytes(program_id, &data, accounts);
+    
+        Ok(instruction)
+    }
 
     pub async fn get_pda_pubkey(&self, program_pubkey: Pubkey, seed: &str) -> Result<Pubkey> {
         let rpc_client = RpcClient::new(self.rpc_url.clone());
@@ -215,35 +232,124 @@ impl CnctdSolana {
     
     pub async fn get_account_data<T: BorshDeserialize>(&self, pubkey: Pubkey) -> Result<T> {
         let rpc_client = RpcClient::new(self.rpc_url.clone());
-    
+        
         match rpc_client.get_account(&pubkey).await {
             Ok(account) => {
+                // Check if account data has at least the discriminator (8 bytes)
                 if account.data.len() < 8 {
                     return Err(anyhow!("Account data is too short to be a valid Anchor account"));
                 }
-    
-                // Limit the slice to the allocated space
-                let allocated_space = 74; // Adjust this based on actual allocation
-                let mut data_slice = &account.data[8..(8 + allocated_space).min(account.data.len())];
-    
-                let data = T::deserialize_reader(&mut data_slice)
+                
+                // Skip the 8-byte discriminator and use the rest of the data
+                let data_slice = &account.data[8..];
+                
+                // Try to deserialize from the entire remaining data
+                let data = T::deserialize(&mut &data_slice[..])
                     .map_err(|e| anyhow!("Failed to deserialize account data: {}", e))?;
-    
+                    
                 Ok(data)
             },
             Err(e) => Err(anyhow!("Error fetching account: {}", e)),
         }
     }
     
+    pub async fn sign_and_confirm_transaction(
+        &self,
+        transaction: &Transaction,
+    ) -> Result<Signature> {
+        let client = &self.client;
+        
+        // Get a recent blockhash
+        let recent_blockhash = client.get_latest_blockhash().await?;
+        
+        // Clone transaction and set the blockhash
+        let mut signed_transaction = transaction.clone();
+        signed_transaction.message.recent_blockhash = recent_blockhash;
+        
+        // Sign the transaction with the keypair
+        let signer_keypair = self.signer_keypair.as_ref()
+            .ok_or_else(|| anyhow!("Signer keypair is not set"))?;
+        signed_transaction.sign(&[signer_keypair], recent_blockhash);
+        
+        // Send and confirm the signed transaction
+        let signature = client.send_and_confirm_transaction(&signed_transaction).await?;
+        
+        Ok(signature)
+    }
+
+    pub async fn simulate_transaction(
+        &self,
+        transaction: &Transaction,
+    ) -> Result<solana_client::rpc_response::RpcSimulateTransactionResult> {
+        let client = &self.client;
+        let recent_blockhash = client.get_latest_blockhash().await?;
+        
+        // Clone the transaction and update blockhash
+        let mut signed_transaction = transaction.clone();
+        signed_transaction.message.recent_blockhash = recent_blockhash;
+        
+        // Sign the transaction for simulation
+        // Without this, simulations involving new accounts will fail
+        if let Some(signer) = &self.signer_keypair {
+            signed_transaction.sign(&[signer], recent_blockhash);
+        } else {
+            return Err(anyhow!("No signer keypair provided for transaction simulation"));
+        }
+        
+        // Use simulation config to handle PDA creation scenarios
+        let config = RpcSimulateTransactionConfig {
+            sig_verify: false,
+            replace_recent_blockhash: true,
+            commitment: Some(CommitmentConfig::confirmed()),
+            accounts: None,
+            encoding: None,
+            min_context_slot: None,
+            inner_instructions: true,
+        };
+        
+        let simulation_result = client.simulate_transaction_with_config(
+            &signed_transaction, 
+            config
+        ).await?;
+        
+        Ok(simulation_result.value)
+    }
     
+    pub async fn estimate_transaction_fee(
+        &self,
+        transaction: &Transaction
+    ) -> anyhow::Result<u64> {
+        // Simulate the transaction to get compute units
+        let simulation = self.simulate_transaction(transaction).await?;
+        
+        // Base fee: 5,000 lamports per signature
+        let base_fee = transaction.signatures.len() as u64 * 5_000;
+        
+        // Extract units consumed from the simulation
+        let compute_units_consumed = simulation.units_consumed.unwrap_or(0);
+        
+        // Compute unit fee calculation
+        // In standard Solana configuration, each compute unit costs about 0.0000005 lamports
+        // This is the default without prioritization fees
+        let compute_unit_price = 5; // micro-lamports per compute unit (5 / 10^6)
+        let compute_fee = (compute_units_consumed as u128 * compute_unit_price as u128 / 1_000_000) as u64;
+        
+        // Total fee
+        let total_fee = base_fee + compute_fee;
+        
+        println!("Estimated fee: {} lamports (base: {}, compute: {}, units: {})",
+                 total_fee, base_fee, compute_fee, compute_units_consumed);
+        
+        Ok(total_fee)
+    }
     
+    pub fn get_discriminator(instruction_name: &str) -> [u8; 8] {
+        let mut hasher = Sha256::new();
+        hasher.update(format!("global:{}", instruction_name).as_bytes());
+        let hash = hasher.finalize();
+        let mut discriminator = [0u8; 8];
+        discriminator.copy_from_slice(&hash[..8]);
+        discriminator
+    }
 }
 
-fn get_discriminator(instruction_name: &str) -> [u8; 8] {
-    let mut hasher = Sha256::new();
-    hasher.update(format!("global:{}", instruction_name).as_bytes());
-    let hash = hasher.finalize();
-    let mut discriminator = [0u8; 8];
-    discriminator.copy_from_slice(&hash[..8]);
-    discriminator
-}
