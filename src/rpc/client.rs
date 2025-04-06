@@ -3,13 +3,16 @@ use std::str::FromStr;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use solana_client::{nonblocking::rpc_client::RpcClient, rpc_config::RpcSimulateTransactionConfig};
+use solana_account_decoder_client_types::UiAccountEncoding;
+use solana_client::{nonblocking::rpc_client::RpcClient, rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig, RpcSimulateTransactionConfig}, rpc_filter::{Memcmp, RpcFilterType}};
 use solana_sdk::{
-    account::Account, commitment_config::CommitmentConfig, hash::hashv, instruction::{AccountMeta, Instruction}, message::Message, pubkey::Pubkey, signature::{Keypair, Signature, Signer}, signer::EncodableKey, transaction::Transaction
+    account::Account, address_lookup_table::program, commitment_config::CommitmentConfig, hash::hashv, instruction::{AccountMeta, Instruction}, message::Message, pubkey::Pubkey, signature::{Keypair, Signature, Signer}, signer::EncodableKey, transaction::Transaction
 };
 use borsh::{BorshSerialize, BorshDeserialize};
 use anyhow::{Result, anyhow};
 use spl_token_2022::solana_program;
+
+use crate::utils::FilterableAccount;
 
 pub trait TransactionExt {
     fn to_base64_string(&self) -> Result<String>;
@@ -251,6 +254,65 @@ impl CnctdSolana {
             },
             Err(e) => Err(anyhow!("Error fetching account: {}", e)),
         }
+    }
+
+    pub async fn get_accounts_by_fields<T: FilterableAccount + BorshDeserialize>(
+        &self,
+        program_id: Pubkey,
+        field_filters: &[(&str, serde_json::Value)],
+    ) -> anyhow::Result<Vec<(Pubkey, T)>> {
+        // Start with the discriminator filter
+        let mut filters = vec![
+            // Filter by discriminator
+            RpcFilterType::Memcmp(Memcmp::new_base58_encoded(0, &T::discriminator())),
+        ];
+        
+        // Add a filter for each field
+        for (field_name, field_value) in field_filters {
+            let offset = T::get_field_offset(field_name)
+                .ok_or_else(|| anyhow!("Field {} not found or not filterable", field_name))?;
+            
+            let value_bytes = T::serialize_field_value(field_name, field_value)
+                .ok_or_else(|| anyhow!("Could not serialize value for field {}", field_name))?;
+            
+            // Add filter for this field
+            filters.push(RpcFilterType::Memcmp(Memcmp::new_base58_encoded(offset, &value_bytes)));
+        }
+        
+        // Get accounts with filters
+        let all_accounts = self.client.get_program_accounts_with_config(
+            &program_id,
+            RpcProgramAccountsConfig {
+                filters: Some(filters),
+                account_config: RpcAccountInfoConfig {
+                    encoding: Some(UiAccountEncoding::Base64),
+                    data_slice: None,
+                    min_context_slot: None,
+                    commitment: None,
+                },
+                with_context: None,
+                sort_results: None,
+            }
+        ).await?;
+        
+        // Deserialize results
+        let mut results = Vec::new();
+        for (pubkey, account) in all_accounts {
+            if account.data.len() <= 8 {
+                continue;
+            }
+            
+            match self.get_account_data::<T>(pubkey).await {
+                Ok(data) => {
+                    results.push((pubkey, data));
+                },
+                Err(e) => {
+                    println!("Error deserializing account {}: {}", pubkey, e);
+                }
+            }
+        }
+        
+        Ok(results)
     }
     
     pub async fn sign_and_confirm_transaction(

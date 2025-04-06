@@ -1,6 +1,6 @@
 [package]
 name = "cnctd_solana"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 authors = ["Connected Dot Inc.", "Kyle Ebner <kyle@cnctd.world>"]
 description = "tools for interacting between the cnctd ecosystem and the solana blockchain."
@@ -23,3 +23,5 @@ spl-token = "7.0.0"
 spl-associated-token-account = "6.0.0"
 solana-transaction-status = "2.2.3"
 mpl-token-metadata = "5.1.0"
+solana-account-decoder-client-types = "2.2.6"
+serde_json = "1.0.140"
