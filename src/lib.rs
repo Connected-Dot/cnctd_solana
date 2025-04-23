@@ -11,7 +11,7 @@ pub use spl_associated_token_account::{get_associated_token_address_with_program
 
 pub const METAPLEX_METADATA_ADDRESS: &str = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
 
-pub mod payments;
+// pub mod payments;
 pub mod rpc;
 pub mod utils;
 
