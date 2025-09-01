@@ -1,16 +1,14 @@
-use std::str::FromStr;
-
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_client::{nonblocking::rpc_client::RpcClient, rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig, RpcSimulateTransactionConfig}, rpc_filter::{Memcmp, RpcFilterType}};
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
-    account::Account, address_lookup_table::program, commitment_config::CommitmentConfig, hash::hashv, instruction::{AccountMeta, Instruction}, message::Message, pubkey::Pubkey, signature::{Keypair, Signature, Signer}, signer::EncodableKey, transaction::Transaction
+    account::Account, hash::hashv, instruction::{AccountMeta, Instruction}, message::Message, pubkey::Pubkey, signature::{Keypair, Signature}, transaction::Transaction
 };
 use borsh::{BorshSerialize, BorshDeserialize};
 use anyhow::{Result, anyhow};
-use spl_token_2022::solana_program;
 
 use crate::utils::FilterableAccount;
 

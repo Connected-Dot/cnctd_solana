@@ -43,7 +43,7 @@ pub trait FilterableAccount: BorshDeserialize {
     fn discriminator() -> [u8; 8];
     
     // New method for calculating offsets dynamically based on field order
-    fn get_field_offset_by_index(field_index: usize) -> Option<usize> {
+    fn get_field_offset_by_index(_field_index: usize) -> Option<usize> {
         // Each implementation can define its field order and sizes
         // to automatically calculate offsets
         None
