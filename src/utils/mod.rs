@@ -2,8 +2,14 @@ use std::str::FromStr;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction}, message::compiled_instruction::CompiledInstruction, pubkey::Pubkey, transaction::Transaction
 };
-pub use filterable_account::FilterableAccount;
+pub use solana_address::Address;
+pub use filterable_account::{FilterableAccount, BorshSize, FixedString32};
+pub use uuid_formatting::UuidFormatting;
+
+use crate::ASSOCIATED_TOKEN_PROGRAM_ID;
+
 pub mod filterable_account;
+pub mod uuid_formatting;
 
 pub fn add_memo_instruction(tx: &mut Transaction, message: &str, payer_pubkey: Pubkey) {
     let memo_program_id =
@@ -46,4 +52,19 @@ pub fn add_memo_instruction(tx: &mut Transaction, message: &str, payer_pubkey: P
         memo_ix.data.clone(),
     );
     tx.message.instructions.push(compiled);
+}
+
+pub fn get_associated_token_address_with_program_id_address(
+    wallet_address: &Address,
+    token_mint_address: &Address,
+    token_program_id: &Address,
+) -> Address {
+    let seeds: &[&[u8]] = &[
+        wallet_address.as_ref(),
+        token_program_id.as_ref(),
+        token_mint_address.as_ref(),
+    ];
+    let associated_token_program_id = ASSOCIATED_TOKEN_PROGRAM_ID;
+    let (ata, _bump) = Address::find_program_address(seeds, &associated_token_program_id);
+    ata
 }
